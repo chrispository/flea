@@ -92,6 +92,7 @@ pub fn open(
     events: async_channel::Receiver<Event>,
     cx: &mut App,
 ) -> Result<WindowHandle<Root>, String> {
+    let _open_trace = crate::startup_trace::span("gui.window_open");
     let title = locale.catalog.tr("app.name");
     let appearance = cx
         .try_global::<crate::palette::Theme>()
@@ -110,6 +111,7 @@ pub fn open(
         ..Default::default()
     };
     cx.open_window(options, |window, cx| {
+        crate::startup_trace::mark("gui.platform_window_ready");
         glass::mount(window, appearance, cx);
         // Wayland holds its callbacks through draw, so the first presented-frame hook must be taken before any frame.
         window.observe_frame_presented(cx, |_, _| {}).detach();
@@ -127,7 +129,9 @@ pub fn open(
         window.set_rem_size(crate::list::Typeface::omarchy_default().body);
         // Every menu's key hints draw the active keyboard group from the first frame.
         crate::g2::mn1::keycaps::watch(cx);
+        let shell_trace = crate::startup_trace::span("gui.shell_build");
         let shell = cx.new(|cx| Shell::new(launch, locale, events, window, cx));
+        drop(shell_trace);
         shell.update(cx, |shell, cx| {
             shell.follow_settings(window, cx);
             shell.follow_media_volume(window, cx);

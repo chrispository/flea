@@ -1,3 +1,4 @@
+use flea_gui::startup_trace;
 use flea_gui::{
     ipc::server::Server,
     presentation,
@@ -30,6 +31,7 @@ fn finish_opening<T>(opened: Result<T, String>) -> T {
 }
 
 fn main() {
+    startup_trace::mark("gui.main_enter");
     let unlock_device = std::env::var("FLEA_UNLOCK")
         .ok()
         .filter(|value| !value.is_empty());
@@ -46,10 +48,12 @@ fn main() {
     if backend_log_tests::emit_if_requested() {
         return;
     }
+    let locale_trace = startup_trace::span("gui.locale");
     let (service, locale) = Service::launch(flea::i18n::Paths::default()).unwrap_or_else(|error| {
         eprintln!("flea-gui: {error}");
         std::process::exit(2);
     });
+    drop(locale_trace);
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if argv.first().map(String::as_str) == Some("--pick") {
         let reply = if argv.len() == 2 {
@@ -69,10 +73,13 @@ fn main() {
     let worker = std::thread::Builder::new()
         .name("flea-startup".into())
         .spawn(move || {
+            let _prepare_trace = startup_trace::span("gui.prepare_worker");
             let started = std::time::Instant::now();
             let devices = flea_gui::g2::pl1::source::seed::start();
+            let settings_trace = startup_trace::span("gui.settings");
             let settings =
                 startup::load_settings().map_err(|error| ("window.settings_failed", error))?;
+            drop(settings_trace);
             let cwd = std::env::current_dir()
                 .map_err(|error| ("window.settings_failed", error.to_string()))?;
             args.absolutize(&cwd);
@@ -80,12 +87,17 @@ fn main() {
                 .ok()
                 .filter(|home| !home.is_empty())
                 .unwrap_or_else(|| "/".into());
+            let ipc_trace = startup_trace::span("gui.ipc_bind");
             let server = flea::ipc::endpoint::runtime()
                 .and_then(|runtime| Server::bind(&runtime))
                 .map_err(|error| ("ipc.start_failed", error.to_string()))?;
+            drop(ipc_trace);
             let mut launch = Launch::resolve(settings, args, &home);
             launch.unlock = unlock_device;
+            let seed_trace = startup_trace::span("gui.device_seed_wait");
             flea_gui::g2::pl1::source::seed::finish(devices, started);
+            drop(seed_trace);
+            let _presentation_trace = startup_trace::span("gui.presentation_prepare");
             Ok::<_, (&str, String)>((launch, server, presentation::Service::start()))
         })
         .unwrap_or_else(|error| {
@@ -97,6 +109,7 @@ fn main() {
             );
             std::process::exit(2);
         });
+    let join_trace = startup_trace::span("gui.prepare_join");
     let (launch, server, (presentation_service, presentation)) = worker
         .join()
         .unwrap_or_else(|_| std::process::exit(2))
@@ -104,11 +117,18 @@ fn main() {
             eprintln!("flea-gui: {}", locale.catalog.tr_args(key, &[&error]));
             std::process::exit(2);
         });
+    drop(join_trace);
     let events = server.events.clone();
-    gpui_platform::application().run(move |cx: &mut App| {
+    let application_trace = startup_trace::span("gpui.application");
+    let application = gpui_platform::application();
+    drop(application_trace);
+    application.run(move |cx: &mut App| {
+        startup_trace::mark("gpui.run_callback");
         cx.set_text_rendering_mode(gpui::TextRenderingMode::Grayscale);
         presentation.install(cx);
+        let epoch_trace = startup_trace::span("gui.text_epoch");
         presentation::epoch::launch(&locale.catalog, &presentation.fonts.family, cx);
+        drop(epoch_trace);
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();

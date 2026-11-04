@@ -25,6 +25,7 @@ pub(crate) mod preview_trace;
 pub mod rail;
 mod reveal;
 pub mod row;
+pub mod startup_trace;
 pub mod state;
 pub mod strips;
 pub mod tabs;

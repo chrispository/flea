@@ -16,6 +16,7 @@ pub(crate) mod perf_tests;
 mod policy;
 mod readback;
 mod snapshot;
+mod startup;
 pub(crate) mod timing;
 
 const RETAINED: usize = 512;
@@ -307,6 +308,7 @@ impl Shell {
         self.presentation.expire(now);
         match event {
             FrameFeedbackEvent::Submitted { draw_id, frame_id } => {
+                startup::submitted();
                 self.presentation
                     .submitted(draw_id, frame_id, window.is_visible(), now);
             }
@@ -346,6 +348,7 @@ impl Shell {
             return;
         };
         self.presentation.frames += 1;
+        startup::presented(&submitted, time, self, window, cx);
         self.presentation
             .timing
             .presented(submitted.id, submitted.monotonic, time);
